@@ -1,0 +1,14 @@
+%% This is the application resource file (.app file) for the,
+%% application.
+{application, emashape,
+  [{description, "Mashape Erlang Client Application"},
+   {vsn, "0.1.0"},
+   {modules, [emashape_app,
+              emashape_sup]},
+   {registered,[emashape_sup]},
+   {applications, [kernel, stdlib, mochiweb, ssl, ibrowse, ossp_uuid]},
+   {agner, [         
+                     {requires, ["mochiweb", "ibrowse", "ossp_uuid"]}
+           ]},
+   {mod, {emashape_app,[]}},
+   {start_phases, []}]}.
