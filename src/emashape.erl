@@ -75,8 +75,8 @@ init([PublicKey, PrivateKey]) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call({post, Url, Params}, _From, State=#state{public_key=PublicKey, private_key=PrivateKey}) ->
-    io:format("~p~n", [request(post, Url, Params, PublicKey, PrivateKey)]),
-    {reply, ok, State}.
+    Response = request(post, Url, Params, PublicKey, PrivateKey),
+    {reply, Response, State}.
 
 %%--------------------------------------------------------------------
 %% @private
