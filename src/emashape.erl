@@ -12,7 +12,9 @@
 
 %% API
 -export([start_link/2,
-        post/4]).
+         request/3,
+         request/4,
+         request/5]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -42,9 +44,16 @@ start_link(PublicKey, PrivateKey) ->
 %%% gen_server callbacks
 %%%===================================================================
 
-post(Url, Params, _, _) ->
-    gen_server:call(?SERVER, {post, Url, Params}).
+request(Type, Url, Params) ->
+    request(Type, Url, Params, true).
 
+request(Type, Url, Params, AddAuthHeaders) ->
+    gen_server:call(?SERVER, {Type, Url, Params, AddAuthHeaders}).
+    
+request(Type, Url, Params, AddAuthHeaders, Fun) when is_function(Fun) ->   
+    gen_server:cast(?SERVER, {Type, Url, Params, AddAuthHeaders, Fun});
+request(Type, Url, Params, AddAuthHeaders, Pid) when is_pid(Pid) ->   
+    gen_server:cast(?SERVER, {Type, Url, Params, AddAuthHeaders, Pid}).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -74,8 +83,11 @@ init([PublicKey, PrivateKey]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({post, Url, Params}, _From, State=#state{public_key=PublicKey, private_key=PrivateKey}) ->
-    Response = request(post, Url, Params, PublicKey, PrivateKey),
+handle_call({Type, Url, Params, AddAuthHeaders}, _From, 
+            State=#state{public_key=PublicKey, private_key=PrivateKey}) ->   
+    Params2 = lists:ukeymerge(1, Params, get_qs_params(Url)),
+    NewUrl = replace_qa_variables(Url, Params2),   
+    Response = request(Type, NewUrl, Params2, PublicKey, PrivateKey, AddAuthHeaders),
     {reply, Response, State}.
 
 %%--------------------------------------------------------------------
@@ -133,10 +145,22 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-request(Type, Url, Params, PublicKey, PrivateKey) ->
-    AuthHeader = auth_header(PublicKey, PrivateKey),
-    Headers = [{'Content-type', "application/x-www-form-urlencoded"}, AuthHeader],
-    Body = proplist_to_qs(Params),    
+request(Type, Url, Params, PublicKey, PrivateKey, AddAuthHeaders) ->    
+    ContentType = {'Content-type', "application/x-www-form-urlencoded"},
+    Headers = case AddAuthHeaders of
+                  true ->
+                      AuthHeader = auth_header(PublicKey, PrivateKey),
+                      [ContentType, AuthHeader];
+                  false ->
+                      [ContentType]
+              end,
+
+    Body = proplist_to_qs(Params),
+    request_(Type, Url, Headers, Body).
+
+request_(get, Url, Headers, Body=[_|_]) ->
+    request_(get, Url++"?"++Body, Headers, []);
+request_(Type, Url, Headers, Body) ->
     {ok, "200", _ResponseHeaders, _Body} = ibrowse:send_req(Url, Headers, Type, Body, []).
 
 auth_header(PublicKey, PrivateKey) ->
@@ -151,10 +175,25 @@ proplist_to_qs(Params) ->
                                         io_lib:format("~s=~s&", [K, V])
                                 end, Params)).
 
+replace_qa_variables(Url, Params) ->
+    lists:flatten(lists:foldl(fun({Key, Value}, Acc) ->
+                      re:replace(Acc, "{"++ Key ++"}", Value, [{return, list}])
+              end, Url, Params)).
 
+get_qs_params(Url) ->
+    [_, QS] = string:tokens(Url, "?"),
+    [{K, V} || [K, V] <- [string:tokens(KV, "=") || KV <- string:tokens(QS, "&")]].    
+        
 %%%===================================================================
 %%% Tests
 %%%===================================================================
 
 proplist_to_qs_test() ->
     ?assertEqual("hello=this&key=value&", proplist_to_qs([{hello, this}, {key, value}])).
+
+replace_qa_variables_test() ->
+    ?assertEqual("?name=Test&key=Value", replace_qa_variables("?name={name}&key={value}", 
+                                                              [{"name", "Test"}, {"value", "Value"}])).
+get_qs_params_test() ->
+    ?assertEqual([{"key1", "value"}, {"key2", "value"}, {"key3", "{value3}"}],
+                 get_qs_params("http://example.com?key1=value&key2=value&key3={value3}")).
