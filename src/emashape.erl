@@ -166,22 +166,23 @@ in_request(Type, Url, Params, PublicKey, PrivateKey, AddAuthHeaders, ParseJson) 
     end.   
 
 in_request(Type, Url, Params, PublicKey, PrivateKey, AddAuthHeaders) ->    
-    ContentType = {'Content-type', "application/x-www-form-urlencoded"},
-    Headers = case AddAuthHeaders of
+    Headers = [{'Content-type', "application/x-www-form-urlencoded"} | client_headers()],
+    Headers2 = case AddAuthHeaders of
                   true ->
                       AuthHeader = auth_header(PublicKey, PrivateKey),
-                      [ContentType, AuthHeader];
+                      [AuthHeader | Headers];
                   false ->
-                      [ContentType]
+                      Headers
               end,
 
     Body = proplist_to_qs(Params),
-    request_(Type, Url, Headers, Body).
+    request_(Type, Url, Headers2, Body).
 
 request_(get, Url, Headers, Body=[_|_]) ->
     request_(get, Url++"?"++Body, Headers, []);
 request_(Type, Url, Headers, Body) ->
-    {ok, _StatusCode, _ResponseHeaders, ResultBody} = ibrowse:send_req(Url, Headers, Type, Body, []),
+    Ssl = string:str(Url, "https") > 0 orelse string:str(Url, "443") > 0,
+    {ok, _StatusCode, _ResponseHeaders, ResultBody} = ibrowse:send_req(Url, Headers, Type, Body, [{is_ssl, Ssl}]),
     ResultBody.
 
 auth_header(PublicKey, PrivateKey) ->
@@ -190,6 +191,9 @@ auth_header(PublicKey, PrivateKey) ->
     HexBin = list_to_binary(string:to_lower(lists:flatten([[integer_to_list(N1,16), integer_to_list(N2,16)] 
                                            || << N1:4, N2:4 >> <= UuidHash]))),
     { 'X-Mashape-Authorization', base64:encode_to_string(<<PublicKey/binary, ":", HexBin/binary, Uuid/binary>>) }.
+
+client_headers() ->
+    [{'X-Mashape-Language', <<"">>}, {'X-Mashape-Version', <<"">>}].
 
 proplist_to_qs(Params) ->   
     lists:flatten(lists:flatmap(fun({K, V}) ->
