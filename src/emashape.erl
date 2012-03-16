@@ -203,8 +203,7 @@ auth_header(PublicKey, PrivateKey) ->
     { 'X-Mashape-Authorization', base64:encode_to_string(<<PublicKey/binary, ":", HexBin/binary, Uuid/binary>>) }.
 
 client_headers() ->
-    [].
-    %%[{'X-Mashape-Language', <<"Erlang">>}, {'X-Mashape-Version', <<"0.0.1">>}].
+    [{'X-Mashape-Language', "ERLANG"}, {'X-Mashape-Version', "V01"}].
 
 proplist_to_qs(Params) ->   
     lists:flatten(lists:flatmap(fun({K, V}) ->
