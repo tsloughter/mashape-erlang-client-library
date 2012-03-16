@@ -26,6 +26,11 @@
 
 -record(state, {public_key, private_key}).
 
+-type http_method() :: get | put | post | delete.
+-type callback() :: function() | pid().
+-type query_params() :: [{string(), string()}].
+-type response() :: list() | binary().
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -44,12 +49,17 @@ start_link(PublicKey, PrivateKey) ->
 %%% gen_server callbacks
 %%%===================================================================
 
+-spec request(Type :: http_method(), Url :: string(), Params :: query_params()) -> response().
 request(Type, Url, Params) ->
     request(Type, Url, Params, true, true).
 
+-spec request(Type :: http_method(), Url :: string(), Params :: query_params(),
+              AddAuthHeaders :: boolean(), ParseJson :: boolean()) -> response().
 request(Type, Url, Params, AddAuthHeaders, ParseJson) ->
     gen_server:call(?SERVER, {request, Type, Url, Params, AddAuthHeaders, ParseJson}).
     
+-spec request(Type :: http_method(), Url :: string(), Params :: query_params(),
+              AddAuthHeaders :: boolean(),  Callback :: callback(), ParseJson :: boolean()) -> response().
 request(Type, Url, Params, AddAuthHeaders, Callback, ParseJson) ->
     gen_server:cast(?SERVER, {request, Type, Url, Params, AddAuthHeaders, Callback, ParseJson}).
 
@@ -193,7 +203,8 @@ auth_header(PublicKey, PrivateKey) ->
     { 'X-Mashape-Authorization', base64:encode_to_string(<<PublicKey/binary, ":", HexBin/binary, Uuid/binary>>) }.
 
 client_headers() ->
-    [{'X-Mashape-Language', <<"">>}, {'X-Mashape-Version', <<"">>}].
+    [].
+    %%[{'X-Mashape-Language', <<"Erlang">>}, {'X-Mashape-Version', <<"0.0.1">>}].
 
 proplist_to_qs(Params) ->   
     lists:flatten(lists:flatmap(fun({K, V}) ->
