@@ -13,8 +13,8 @@
 %% API
 -export([start_link/2,
          request/3,
-         request/4,
-         request/5]).
+         request/5,
+         request/6]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -45,15 +45,13 @@ start_link(PublicKey, PrivateKey) ->
 %%%===================================================================
 
 request(Type, Url, Params) ->
-    request(Type, Url, Params, true).
+    request(Type, Url, Params, true, true).
 
-request(Type, Url, Params, AddAuthHeaders) ->
-    gen_server:call(?SERVER, {Type, Url, Params, AddAuthHeaders}).
+request(Type, Url, Params, AddAuthHeaders, ParseJson) ->
+    gen_server:call(?SERVER, {request, Type, Url, Params, AddAuthHeaders, ParseJson}).
     
-request(Type, Url, Params, AddAuthHeaders, Fun) when is_function(Fun) ->   
-    gen_server:cast(?SERVER, {Type, Url, Params, AddAuthHeaders, Fun});
-request(Type, Url, Params, AddAuthHeaders, Pid) when is_pid(Pid) ->   
-    gen_server:cast(?SERVER, {Type, Url, Params, AddAuthHeaders, Pid}).
+request(Type, Url, Params, AddAuthHeaders, Callback, ParseJson) ->
+    gen_server:cast(?SERVER, {request, Type, Url, Params, AddAuthHeaders, Callback, ParseJson}).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -83,12 +81,13 @@ init([PublicKey, PrivateKey]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({Type, Url, Params, AddAuthHeaders}, _From, 
-            State=#state{public_key=PublicKey, private_key=PrivateKey}) ->   
-    Params2 = lists:ukeymerge(1, Params, get_qs_params(Url)),
-    NewUrl = replace_qa_variables(Url, Params2),   
-    Response = request(Type, NewUrl, Params2, PublicKey, PrivateKey, AddAuthHeaders),
-    {reply, Response, State}.
+handle_call({request, Type, Url, Params, AddAuthHeaders, ParseJson}, From, 
+            State=#state{public_key=PublicKey, private_key=PrivateKey}) ->       
+    proc_lib:spawn_link(fun() ->
+                                Reply = in_request(Type, Url, Params, PublicKey, PrivateKey, AddAuthHeaders, ParseJson),
+                                gen_server:reply(From, Reply)
+                        end),
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -100,7 +99,12 @@ handle_call({Type, Url, Params, AddAuthHeaders}, _From,
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast(_Msg, State) ->
+handle_cast({request, Type, Url, Params, AddAuthHeaders, Callback, ParseJson},
+            State=#state{public_key=PublicKey, private_key=PrivateKey}) ->    
+    proc_lib:spawn_link(fun() ->
+                                Return = in_request(Type, Url, Params, PublicKey, PrivateKey, AddAuthHeaders, ParseJson),
+                                run_callback(Callback, Return)
+                        end),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -145,7 +149,23 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-request(Type, Url, Params, PublicKey, PrivateKey, AddAuthHeaders) ->    
+run_callback(Fun, Result) when is_function(Fun) ->
+    Fun(Result);
+run_callback(Pid, Result) when is_pid(Pid) ->
+    Pid ! {result, Result}.
+
+in_request(Type, Url, Params, PublicKey, PrivateKey, AddAuthHeaders, ParseJson) ->    
+    Params2 = lists:ukeymerge(1, Params, get_qs_params(Url)),
+    NewUrl = replace_qa_variables(Url, Params2),   
+    Result = in_request(Type, NewUrl, Params2, PublicKey, PrivateKey, AddAuthHeaders),
+    case ParseJson of
+        true ->
+            mochijson2:decode(Result);
+        false ->
+            Result
+    end.   
+
+in_request(Type, Url, Params, PublicKey, PrivateKey, AddAuthHeaders) ->    
     ContentType = {'Content-type', "application/x-www-form-urlencoded"},
     Headers = case AddAuthHeaders of
                   true ->
@@ -161,7 +181,8 @@ request(Type, Url, Params, PublicKey, PrivateKey, AddAuthHeaders) ->
 request_(get, Url, Headers, Body=[_|_]) ->
     request_(get, Url++"?"++Body, Headers, []);
 request_(Type, Url, Headers, Body) ->
-    {ok, "200", _ResponseHeaders, _Body} = ibrowse:send_req(Url, Headers, Type, Body, []).
+    {ok, _StatusCode, _ResponseHeaders, ResultBody} = ibrowse:send_req(Url, Headers, Type, Body, []),
+    ResultBody.
 
 auth_header(PublicKey, PrivateKey) ->
     Uuid = ossp_uuid:make(v4, text), 
